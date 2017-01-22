@@ -1,0 +1,48 @@
+<p><link rel="stylesheet" type="text/css" href="style.css"></p>
+
+<h1>Python list and dict with undo</h1>
+
+<p>I've made some python list and dict with undo and redo so I can play back and forth the operations applied to them. Its on <a href="https://github.com/asrp/undoable">Github</a>.</p>
+
+<p>When making this, I found a few webpages about undo but there doesn't seem to a clear answer for how to get fast undo and/or low memory usage (or what the trade-off between the two can be). Or even some nice basic building block to start from to ensure a coherent state at all times.</p>
+
+<h2>A broadly applicable way</h2>
+
+<p>Well there's <a href="http://www.drdobbs.com/an-efficient-undoredo-algorithm/184404861">this description</a> which is pretty comprehensive but its <em>making an entire copy</em> of an object whenever the object changes, which just looks very inefficient for something like <code>list.append</code>. The author does say that in their implementation, they use partial copies but it doesn't address the issue of array-like structures in general.</p>
+
+<h2>Patterns</h2>
+
+<p>There's this <a href="http://stackoverflow.com/questions/49755/design-pattern-for-undo-engine">Stackoverflow question</a> which suggests some patterns.</p>
+
+<ul>
+<li><p><strong><a href="https://en.wikipedia.org/wiki/Command_pattern">Command pattern</a></strong>: record the function and parameters to undo an action before taking the action. Then run the recorded function with the recorded parameters to undo.</p>
+
+<p>It doesn't need to be functions and parameters in general, just all the information needed to undo packed in an object (a <em>command</em>). Multiple undos have to be rolled back one-by-one.</p></li>
+<li><p><strong><a href="http://en.wikipedia.org/wiki/Memento_pattern">Memento pattern</a></strong>: save a state regeneration "seed" whenever a change is made. To undo, just pick the state you want to be in and regenerate it from the seed.</p>
+
+<p>This seems more adapted for simple things like random number generation and not lists of lists.</p></li>
+</ul>
+
+<p>I ended up using the command pattern.</p>
+
+<h2>Databases</h2>
+
+<p>Undo and redo are exactly the kind of operations databases deal with but I didn't find anything that I could use for list and dict. Stuff on databases are very strongly focused on relational databases which are tables with rows and columns. While lists could be thought of as a single row or column, having a table for each list doesn't look like the right representation of the data, especially if you have lists of lists of lists.</p>
+
+<h2>Known problems</h2>
+
+<p>I'm assume parameters passed are immutable, which is very much not true. For example <code>list.extend</code> would give a different result on a <code>redo</code> if the list passed as parameter is changed after extend is called.</p>
+
+<p>Although in general, mixing objects tracked and untracked by the undo system could give you this problem anyway.</p>
+
+<h2>Studying existing programs</h2>
+
+<p>We have so many programs with pretty advanced looking undo features. Is there an easy way to extract a description of how each of them implement undo?</p>
+
+<p>Does this mean whenever they add something new, they have to make it "tracked" by the existing undo feature? Or is everything else immutable?</p>
+
+<h2>A half-baked idea for efficiency</h2>
+
+<p>Rolling back one command at a time is a bit slow and snapshots take up memory (<em>and</em> are slow to make). What if we only redo operations and a snapshot from one operation ago, 2 operations ago, 4, 8, 16, and so on? (Or a different base for the exponent, like 1.5.)</p>
+
+<p>This would save on memory and only things from far back would take long to get to.</p>
