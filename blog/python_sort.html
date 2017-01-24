@@ -1,0 +1,151 @@
+<p><link rel="stylesheet" type="text/css" href="style.css"></p>
+
+<h1>Messing with Python's sort function</h1>
+
+<p>There are many interesting things about python's <code>sort</code> function like how its adapts depending on the input, how its stable in-place, how its in other languages and <a href="http://envisage-project.eu/proving-android-java-and-python-sorting-algorithm-is-broken-and-how-to-fix-it/">how it could give the wrong result</a>. This post is about none of those.</p>
+
+<h2>What and why</h2>
+
+<p>Instead I'm going to try to mess with Python's <em>implementation</em> of Timsort and try to make it give the wrong answer through no fault of its own. And I will fail.</p>
+
+<p>The reason for doing this is that shortly after releasing my <a href="https://github.com/asrp/undoable">undoable</a> library to the world, I found a bug in my <code>replace</code> function that emptied the list on an error. Here's that function.</p>
+
+<pre><code>def replace(self, newlist):
+    oldlist = self[:]
+    self.skiplog += 1
+    del self[:]
+    self.extend(newlist)
+    self.skiplog -= 1
+    self.callback(("replace", oldlist), ("replace", newlist))
+</code></pre>
+
+<p>Its supposed to replace a list with the content of another one while avoiding a reassignment of everything pointing to that list. But if the new "list" was actually an integer, <code>del self[:]</code> ran but <code>self.extend(newlist)</code> gives an error. (I wrapped the <code>extend</code> part in a try-except block as a fix but that's not what I want to talk about here.)</p>
+
+<p>This got me thinking of Python's <code>sort</code> function. Since not only does it have many steps, each one of which could give an error, but its also <em>in-place</em>. If an error happens along the way, there's no copy of the original list to revert back to! Maybe there's an easier way to handle or prevent these errors? Let's look for the answer in Python guaranttee consistency.</p>
+
+<h2>Result</h2>
+
+<p>Let's see what comparisons are made first.</p>
+
+<pre><code>&gt;&gt;&gt; l = [4, 2, 29, 1, 6, (1,)]
+&gt;&gt;&gt; def log_cmp(x, y):
+...     print "comparing", x, y
+...     return cmp(x, y)
+...
+&gt;&gt;&gt; l.sort(cmp=log_cmp)
+comparing 2 4
+comparing 29 2
+comparing 29 4
+comparing 1 4
+comparing 1 2
+comparing 6 4
+comparing 6 29
+comparing (1,) 4
+comparing (1,) 29
+&gt;&gt;&gt; l
+[1, 2, 4, 6, 29, (1,)]
+</code></pre>
+
+<p>Ok, I'll try to trip it up now by adding an error when <code>(1,)</code> is compared since that only happens near the end.</p>
+
+<pre><code>&gt;&gt;&gt; def error_cmp(x, y):
+...     print "comparing", x, y
+...     if (1,) in [x, y]:
+...         raise Exception("No-go sort")
+...     return cmp(x, y)
+... 
+&gt;&gt;&gt; l = [4, 2, 29, 1, 6, (1,)]
+&gt;&gt;&gt; l.sort(cmp=error_cmp)
+comparing 2 4
+comparing 29 2
+comparing 29 4
+comparing 1 4
+comparing 1 2
+comparing 6 4
+comparing 6 29
+comparing (1,) 4
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in &lt;module&gt;
+  File "&lt;stdin&gt;", line 4, in error_cmp
+Exception: No-go sort
+&gt;&gt;&gt; l
+[1, 2, 4, 6, 29, (1,)]
+</code></pre>
+
+<p>Looks like it doesn't rollback on an error. In fact, the comment above <code>listsort</code> in <code>listobject.c</code> in the <a href="http://svn.python.org/view/python/trunk/Objects/listobject.c?view=markup">source code</a> says</p>
+
+<pre><code>2037    /* An adaptive, stable, natural mergesort. See listsort.txt.
+2038    * Returns Py_None on success, NULL on error. Even in case of error, the
+2039    * list will be some permutation of its input state (nothing is lost or
+2040    * duplicated).
+</code></pre>
+
+<p>Hmm, what if we tried to <em>change the list</em> midway then?</p>
+
+<pre><code>&gt;&gt;&gt; def add_cmp(x, y):
+...     print "comparing", x, y, l
+...     l.append(100)
+...     return cmp(x, y)
+... 
+&gt;&gt;&gt; l = [4, 2, 29, 1, 6, (1,)]
+&gt;&gt;&gt; l.sort(cmp=add_cmp)
+comparing 2 4 []
+comparing 29 2 [100]
+comparing 29 4 [100, 100]
+comparing 1 4 [100, 100, 100]
+comparing 1 2 [100, 100, 100, 100]
+comparing 6 4 [100, 100, 100, 100, 100]
+comparing 6 29 [100, 100, 100, 100, 100, 100]
+comparing (1,) 4 [100, 100, 100, 100, 100, 100, 100]
+comparing (1,) 29 [100, 100, 100, 100, 100, 100, 100, 100]
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in &lt;module&gt;
+ValueError: list modified during sort
+&gt;&gt;&gt; l
+[1, 2, 4, 6, 29, (1,)]
+</code></pre>
+
+<p>So the variable <code>l</code> temporarily loses its value while being sorted? This needs one more test.</p>
+
+<pre><code>&gt;&gt;&gt; def undo_cmp(x, y):
+...     print "comparing", x, y, l
+...     l.append(100)
+...     if (x, y) == ((1,), 29):
+...         del l[:]
+...         print "new value", l
+...     return cmp(x, y)
+... 
+&gt;&gt;&gt; l = [4, 2, 29, 1, 6, (1,)]
+&gt;&gt;&gt; l.sort(cmp=undo_cmp)
+comparing 2 4 []
+comparing 29 2 [100]
+comparing 29 4 [100, 100]
+comparing 1 4 [100, 100, 100]
+comparing 1 2 [100, 100, 100, 100]
+comparing 6 4 [100, 100, 100, 100, 100]
+comparing 6 29 [100, 100, 100, 100, 100, 100]
+comparing (1,) 4 [100, 100, 100, 100, 100, 100, 100]
+comparing (1,) 29 [100, 100, 100, 100, 100, 100, 100, 100]
+new value []
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in &lt;module&gt;
+ValueError: list modified during sort
+</code></pre>
+
+<p>Well, that was still caught. I suppose we could have just looked at <a href="http://svn.python.org/view/python/trunk/Objects/listobject.c?view=markup">the source</a> and seen</p>
+
+<pre><code>2091    self-&gt;allocated = -1; /* any operation will reset it to &gt;= 0 */
+...
+2180    if (self-&gt;allocated != -1 &amp;&amp; result != NULL) {
+2181    /* The user mucked with the list during the sort,
+2182    * and we don't already have another error to report.
+2183    */
+2184    PyErr_SetString(PyExc_ValueError, "list modified during sort");
+2185    result = NULL;
+</code></pre>
+
+<p>Now if only I tested my own stuff this much. Or find people I could trade program-testing with.</p>
+
+<p>Unfortunately, the answer to my initial question of how to handle these cases seems to be "add checks for special cases". Maybe the complexity of the consistency/atomicity I want forces this kind of verbosity?</p>
+
+<p><strong><a href="index.html">Blog index</a></strong></p>
