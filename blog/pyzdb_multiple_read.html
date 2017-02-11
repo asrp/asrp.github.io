@@ -1,0 +1,64 @@
+<p><link rel="stylesheet" type="text/css" href="style.css"></p>
+
+<h1>Allowing multiple read-only servers in pyzdb</h1>
+
+<p>I finally changed <a href="https://github.com/asrp/pyzdb">pyzdb</a> to support multiple servers. Actually, multiple read servers with a single write server. This post discusses the design and implementation selected. The pyzdb README now contains an example of how to use it.</p>
+
+<p>This was in the original set of features I wanted for pyzdb but stopped when a single server worked well enough for my needs.</p>
+
+<h2>Chosen implementation</h2>
+
+<p>The read servers reload the database once in a while when there are changes (from the write server). For the moment</p>
+
+<ol>
+<li>"once in a while" means when the server is idle (no read requests in the queue) [1]</li>
+<li>"changes" are detected by the polling the timestamp of the database file for changes</li>
+</ol>
+
+<p>The second point means that some other way (like <code>rsync</code>) should be used if the databases do not have access to the same filesystem.</p>
+
+<p><img src="multi-write-architecture.svg" alt="Connections between clients, servers and queues." title="" /></p>
+
+<p>The clients have to decide if their requests is read-only or not and connect to the right address (URI) accordingly (there are two: the read-only address and the read-write address). Right now, <code>client.py</code> uses a heuristic based on the name of the function called to determine if the write server is needed.</p>
+
+<h2>Other options considered</h2>
+
+<h3>Majordomo pattern</h3>
+
+<p>At first, this seems like the <a href="http://zguide.zeromq.org/page:all#Service-Oriented-Reliable-Queuing-Majordomo-Pattern">Majordomo pattern</a> fits this particular case exactly, with two types of workers. However, the example given is rather complicated. From <a href="http://zguide.zeromq.org/page:all#Service-Oriented-Reliable-Queuing-Majordomo-Pattern">that page</a>:</p>
+
+<blockquote>
+  <p>This is by far the most complex example we've seen. It's almost 500 lines of code. To write this and make it somewhat robust took two days. However, this is still a short piece of code for a full service-oriented broker.</p>
+</blockquote>
+
+<p>I was hoping to find something with just two types of workers and without automatic retries from the clients. (And also avoiding to decide what "disconnection from timeout" means.)</p>
+
+<h3>Unique identities</h3>
+
+<p>I didn't find much documentation on <code>zmq.IDENTITY</code> but <a href="http://zguide.zeromq.org/py:rtdealer">this example</a> also almost seem like what we want. I think its meant to be a unique identifier inside the network and the message header makes sure that messages gets to the right server, but from the <a href="http://zguide.zeromq.org/py:rtdealer">example I found</a>, it seems that I would have to make the client asynchronous (right now only the server is) using a <code>zmq.DEALER</code> socket rather than <code>zmq.REQ</code> (since I want this for clients and not "workers"/servers). And I wanted asynchronous clients to be at least optional.</p>
+
+<h3>Custom process device</h3>
+
+<p>One other way would be to replace the (only) router-dealer with one that forwards the messages to the right server depending on the request type (read-only or read-write), using three connections</p>
+
+<p><img src="single-queue-architecture.svg" alt="Custom process device architecture" title="" /></p>
+
+<p>The good thing about this one is that all clients would connect to a single URI instead of two. Since the router-dealer is a bottleneck, I'd like the queue to work quickly and this doesn't seem easy to do with <code>pyzmq</code>. One way would be to write a C program for it or to forgo the performance hit. I chose not to do either and with the current implementation, its still possible to put a third queue between the client and two existing queues.</p>
+
+<p>In either case, I think the messages should probably be multipart then to avoid decoding JSON inside any queues.</p>
+
+<h2>Other implementation notes</h2>
+
+<p>(Probably not that interesting.)</p>
+
+<ul>
+<li>There's a hard coded 0.1s delay between checking if the database is updated when the read-only queue is empty. It may be worthwhile moving this to a named constant.</li>
+<li>Both read-only and read-write queues are started when the read-write server is started (by calling <code>python server.py</code>). This is a bit ugly when using only a single server because it leaves an empty queue (that's still listening). There could be made optional with some command line parameter but it seems like there are already too many.</li>
+<li>Sending a read-write request and then reading it back with a read-only request may return data before the write (even after save). Although sending a read-write request that actually only reads data will return the newly written data.</li>
+</ul>
+
+<h2>Footnotes</h2>
+
+<p>[1] This does means that no starvation checks are in place (so the read-databases can get really out-of-sync but in that case (where there are far more requests than servers can handle), its not obvious to me what the right answer anyways. Seems like I'd want an empty request queue sometimes or even most of the time since piled up requests means all requests get higher latency.</p>
+
+<p><strong><a href="index.html">Blog index</a></strong></p>
