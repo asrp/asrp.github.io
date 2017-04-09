@@ -1,0 +1,88 @@
+<p><link rel="stylesheet" type="text/css" href="style.css"></p>
+
+<h1>Visual explanation of a Google Codejam 2017 question</h1>
+
+<p>This is the last question from the <a href="https://code.google.com/codejam/contest/dashboard?s=p3">Google Codejam 2017 qualification round</a>.</p>
+
+<h2>Question</h2>
+
+<p>How can we place models</p>
+
+<p><img width="90%" src="gcj/points.png" alt="Models. +: 1 point, x: 1 point, o: 2 points" title="" /></p>
+
+<p>on the square stage</p>
+
+<p><img width="70%" src="gcj/grid.png" alt="The stage is a grid" title="" /></p>
+
+<p>to get as many points as possible? The rules are</p>
+
+<ul>
+<li>If two models on the same row or column, at least one is a <strong>+</strong>.</li>
+<li>If two models on the same diagonal, at least one is a <strong>X</strong>.</li>
+</ul>
+
+<p><img width="90%" src="gcj/rules.png" alt="Rules" title="" /></p>
+
+<p>Some models are already placed.</p>
+
+<p><img width="70%" src="gcj/preplaced.png" alt="Pre-placed models" title="" /></p>
+
+<p>We can only change a + or X to an O or place new models on the stage.</p>
+
+<h2>Separation</h2>
+
+<p>From the rules, all rows look like this</p>
+
+<p><img width="90%" src="gcj/row.png" alt="One row" title="" /></p>
+
+<p>where at most one model is <em>not</em> a <strong>+</strong>. Let's just record where the <strong>non-+</strong>s are</p>
+
+<p><img width="90%" src="gcj/negate.png" alt="A non-+" title="" /></p>
+
+<p>The rule is now: at most one non-+ per row and column.</p>
+
+<p>So we can convert a grid (stage) into one grid of non-+ and one grid of non-x.</p>
+
+<p><img width="90%" src="gcj/transformed-grid.png" alt="Translation" title="" /></p>
+
+<p>using these rules</p>
+
+<p><img width="90%" src="gcj/translation.png" alt="Translation table" title="" /></p>
+
+<p>and the points match up if each non-+ and non-x is worth 1 style point.</p>
+
+<p><img width="70%" src="gcj/new-points.png" alt="New style points" title="" /></p>
+
+<p>The already placed models translate to already placed non-+ and non-x.</p>
+
+<p>This lets us place non-+s and non-xs separately.</p>
+
+<h2>+</h2>
+
+<p>non-+ is the easier of the two. A preplaced non-+ means we can't put more non-+ in that row or column</p>
+
+<p><img width="70%" src="gcj/new-square.png" alt="Removed squares from pre-placed non-+" title="" /></p>
+
+<p>so we might as well remove them and get a smaller square. How can we place as many non-+ as possible?</p>
+
+<p><img width="70%" src="gcj/opt-plus.png" alt="Best placement of non-+" title="" /></p>
+
+<p>Along the diagonal is one way. This places as many non-+ as we have rows (or columns) so we can't do better.</p>
+
+<h2>x</h2>
+
+<p>non-x placement is</p>
+
+<p><img width="90%" src="gcj/nonx.gif" alt="Non-x transformation" title="" /></p>
+
+<p>non-+ placement rotated by 45 degrees. But now the stage isn't a square anymore. How can be place a maximum number of non-+ here?</p>
+
+<p>This looks like some kind of <a href="https://en.wikipedia.org/wiki/Set_packing">set packing</a> where the squares are the elements and the rows and columns are the subsets. Since each square appears in exactly two subsets,</p>
+
+<p><img width="70%" src="gcj/bipartite-grid.png" alt="Grid to bipartite graph" title="" /></p>
+
+<p>set packing here is actually <a href="https://en.wikipedia.org/wiki/Matching_%28graph_theory%29#Bipartite_matching">maximum bipartite matching</a>.</p>
+
+<p><img width="50%" src="gcj/bipartite-graph.png" alt="Maximum matching in the bipartite graph" title="" /></p>
+
+<p><strong><a href="index.html">Blog index</a></strong></p>
