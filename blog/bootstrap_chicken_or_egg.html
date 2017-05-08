@@ -1,0 +1,173 @@
+<p><link rel="stylesheet" type="text/css" href="style.css"></p>
+
+<h1>The chicken or the egg problem in bootstrapping</h1>
+
+<p><img width="60%" src="chicken_or_egg.svg" alt="Chicken or egg?" title="" /></p>
+
+<blockquote>
+  <p>Which came first? The chicken or the egg?</p>
+</blockquote>
+
+<p>This post discusses bootstrapping: the first step when trying to make something new. Bootstrapping is needed in many places.</p>
+
+<ol>
+<li>Getting existing programs to run on new hardware (especially new CPU architecture).</li>
+<li>The startup process of a computer from <em>boot</em> to a running operating system</li>
+<li>Implementing a new idea in an existing programming language (something completely new or just unusual enough so the target language hinders more than helps).</li>
+<li>Implementing a compiler/interpreter "from scratch".</li>
+</ol>
+
+<p>What I'll call the "chicken or egg" problems happens in all of them although I'm writing this because I was faced with the fourth type and I want to make a suggestion of how to get around that problem in the third case.</p>
+
+<h1>Chicken or egg problems</h1>
+
+<blockquote>
+  <p>Which came first? The chicken or the egg?</p>
+
+<p>If its the chicken, where did it come from? Certainly an egg. If its the egg then what laid it? Surely a chicken.</p>
+</blockquote>
+
+<p>This dilemma materialized to a concrete problem for bootstrapping. If I already had whatever it is I'm trying to make then it would be so much easier to make a second one. Not because of the experience earned by creating the first one, but because I could <em>run the first copy to make the second copy</em>.</p>
+
+<p>For example, having a compiler running on some new hardware makes it much easier to get a second (different) compiler running because the first compiler could be used to compile the second compiler, instead of having to write it in something much more low level.</p>
+
+<p>If an operating system is already running, its much easier to get it to do something else, like run things from a different OS.</p>
+
+<p>Its much easier to add features to an existing language so it behaves like the new language I want than to implement the syntax and semantics of a language from scratch.</p>
+
+<h2>Python interpreter</h2>
+
+<p>I'll now focus on a chicken or egg problem I faced when adding semantics to <a href="https://github.com/asrp/pymetaterp">pymetaterp</a>, a python (variant) interpreter.</p>
+
+<p>Say I want to add <em>if statement</em>s. Well, if I already had <em>for</em> and <em>if statement</em>s implemented, it'd be easy to define them as</p>
+
+<pre><code>def if_stmt(*condition_and_blocks):
+    for condition, block in condition_and_blocks:
+        if evaluate(condition):
+            return evaluate(block)
+</code></pre>
+
+<p>"Check each condition in an <code>if...elif...else</code> block in turn and if it evaluates to <code>True</code>, run (evaluate) the block under that condition and stop (return)."</p>
+
+<p>And the same goes for <em>try statement</em>s</p>
+
+<pre><code>def try_stmt(block, handling):
+    try:
+        evaluate(block)
+    except Exception as error:
+        for exception_clause, except_block in handling:
+            if type(error) == evaluate(exception_clause[0]):
+                evaluate(except_block)
+                return
+</code></pre>
+
+<p>But even supposing the recursive calls to themselves was not a problem (by hard coding the effects of that single <code>if</code> and <code>try</code> statement), both of them contain a <em>for statement</em>, which we have to implement. Maybe something like</p>
+
+<pre><code>def for_stmt(index_var, iterable, block, else_block=None):
+    iterator = iter(evaluate(iterable))
+    while True:
+        try:
+            assignment(index_var, iterator.next())
+        except StopIteration:
+            if else_block is not None:
+                evaluate(else_block)
+            return
+        evaluate(block)
+</code></pre>
+
+<p>But now this depends on <code>for_stmt</code> <em>and</em> <code>try_stmt</code> (not to mention a <em>while statement</em> thrown in for good measure).</p>
+
+<p><img src="callgraph_loop.svg" alt="Call graph with many loops" title="" /></p>
+
+<p>If I had none of these already, where can I even start?</p>
+
+<h1>Solution</h1>
+
+<p>A solution to the chicken or egg problem is also evolution's answer to the chicken or egg problem: something that's not quite a chicken laid an egg of something that's closer to a chicken which laid an egg of  something that's even closer to a chicken and so on until we get the actual chicken [1]. </p>
+
+<h2>Python interpreter</h2>
+
+<p><img src="callgraph_no_loop.svg" alt="Solution diagram" title="" /></p>
+
+<p>Apply this to implementing a Python interpreter, instead of <code>if_stmt</code>, <code>try_stmt</code> and <code>for_stmt</code>, I will first have a copy of their simpler cousins <code>single_if</code>, <code>try_stmt_error</code> and <code>simple_for_stmt</code> and have the full versions call the simpler version.</p>
+
+<pre><code>def single_if(condition, block):
+    if_true = {True: block, False: `pass`}
+    evaluate(if_true[bool(evaluate(condition))])
+</code></pre>
+
+<p><code>single_if</code> can only handle a single condition and a single block. [2]</p>
+
+<pre><code>def simple_for(index_var, iterable, block):
+    index = 0
+    iterable = evaluate(iterable)
+    length = len(iterable)
+    while True:
+        assignment(index_var, iterable[index], skip_eval=True)
+        evaluate(block)
+        index = index + 1
+        if index == length:
+            return
+</code></pre>
+
+<p><code>simple_for</code> assumes the iterable is indexable and doesn't change length throughout the loop.</p>
+
+<pre><code>def try_stmt_error(error, handling):
+    simple_for exception_clause, except_block in handling:
+        if type(error) == evaluate(exception_clause[0]):
+            evaluate(except_block)
+            return
+    raise error
+</code></pre>
+
+<p><code>try_stmt_error</code> is only the error handling portion of <code>try_stmt</code>, in case an error is actually raised while evaluation the main block. (Unfortunately, calls to it are handled by the interpreter internals [3].) [4]</p>
+
+<p>As we can see from <code>try_stmt_error</code>, all three of <code>if_stmt</code>, <code>try_stmt</code> and <code>for_stmt</code> can be implemented by using only calls to their simpler versions <code>single_if</code>, <code>try_stmt_error</code> and <code>simple_for_stmt</code> and therefore breaking the cycle in their dependence.</p>
+
+<p>(The <em>while statement</em>'s implementation also has a simpler version <code>while_true</code> for when condition is always <code>True</code> and that's the only one we need here.)</p>
+
+<h2>Solution to other problems</h2>
+
+<p>This is also how the boot process works when a computer starts (more or less): a more featureful system is built from a simple one. And this is repeated a few times.</p>
+
+<p>The same could be true for adding a feature to a language. Add something that's closer to the final result first and then use that to take the next step.</p>
+
+<h1>Alternative solutions</h1>
+
+<h2>Build the whole thing in one go</h2>
+
+<p>Sometimes, mutual dependence isn't a problem, except for being unable to run the entire system when completed. In fact, the first layer has to be built in one go.</p>
+
+<p>But I find being able to run and visualize design and other errors to be extremely useful and am in favour of having a simple first layer with small differences between each.</p>
+
+<p>In fact, the differences could just be a single command/statement each time.</p>
+
+<h2>Cross-compilation</h2>
+
+<p>For the compiler example, we use a compiler on an existing architecture to generate machine for the target new hardware. I.e., cross compile. This usually means being able to get something running much faster.</p>
+
+<p>One downside is that its not possible to modify the bootstrapping process (by virtue of it not existing). Although this (now unnecessary) boostrapping process can also be re-created after something already runs on the new hardware. And creating the steps while the final product already exists is much easier.</p>
+
+<p>In some sense, this is part of the solution I used to implement a Python interpreter. Since it was done in Python, the CPython interpreter was used to replace anything missing while implementing the other parts.</p>
+
+<p>In general, this would mean to use something existing to make another copy of itself in a different context.</p>
+
+<h1>Footnotes</h1>
+
+<ul>
+<li>[1] The actual chain is probably much more erratic becoming closer or further from being a chicken for each generation, only becoming closer to a chicken as a general trend.</li>
+<li>[2] This implementation is inspired by Smalltalk and begs the question of how <code>__getitem__</code> works, which won't be answered in this post.</li>
+<li>[3] Did I forget to mention that these functions are <em>interpreted</em> by pymetaterp (as opposed to the CPython interpreter directly)? This does mean you could potentially change the meaning of a <em>for statement</em> halfway through a program. Not that you should, but <em>should</em> and <em>should be able to</em> are different things and I think you should be able to (as long as its not to easy to trigger the effect by accident).</li>
+<li>[4] In fact <code>try_stmt</code> was already a less powerful version of Python's try statement since all clauses had to name an exception type and it doesn't allow for a <code>finally</code> block.</li>
+</ul>
+
+<h2>Further readings</h2>
+
+<ul>
+<li><a href="https://github.com/kanaka/mal">Mal</a>: bootstrapping Lisp from many languages in 10 easy steps.</li>
+<li><a href="https://en.wikipedia.org/wiki/Bootstrap#Computing">Wikipedia page on bootstrap in computing</a></li>
+</ul>
+
+<h2>Images</h2>
+
+<p>Images used are from the public domain: <a href="https://openclipart.org/detail/210131/inhabitants-npc-chicken">chicken</a>, <a href="https://openclipart.org/detail/6696/brown-egg">egg</a></p>
